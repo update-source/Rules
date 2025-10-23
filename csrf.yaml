@@ -1,0 +1,162 @@
+rules:
+- id: "wordpress-csrf-missing-nonce-verification"
+  patterns:
+    - pattern-inside: |
+        function $FUNC(...) {
+          ...
+        }
+    - pattern-either:
+        - pattern: update_option($KEY, $_POST[$VAL])
+        - pattern: update_post_meta($ID, $KEY, $_POST[$VAL])
+        - pattern: delete_post_meta($ID, $KEY, $_POST[$VAL])
+        - pattern: wp_delete_post($POST_ID)
+        - pattern: wp_trash_post($POST_ID)
+        - pattern: $WPDB->query(...)
+        - pattern: $WPDB->insert(...)
+        - pattern: $WPDB->update(...)
+        - pattern: $WPDB->delete(...)
+        - pattern: unlink($FILE)
+        - pattern: file_put_contents($FILE, $DATA)
+    - pattern-not-inside: |
+        if (wp_verify_nonce($_POST[$NONCE], $ACTION)) {
+          ...
+        }
+    - pattern-not-inside: |
+        if (check_ajax_referer($ACTION, $PARAM)) {
+          ...
+        }
+    - pattern-not-inside: |
+        if (check_admin_referer($ACTION)) {
+          ...
+        }
+  languages: ["php"]
+  message: |
+    Missing CSRF protection in WordPress. Form submission or AJAX request processes sensitive operations without nonce verification.
+    
+    Vulnerable code example:
+    update_option('my_setting', $_POST['setting_value']);
+    
+    Secure code using WordPress nonce verification:
+    if (!isset($_POST['_wpnonce']) || !wp_verify_nonce($_POST['_wpnonce'], 'update_my_settings')) {
+        wp_die('Security check failed');
+    }
+    update_option('my_setting', sanitize_text_field($_POST['setting_value']));
+  severity: ERROR
+  metadata:
+    category: security
+    technology: [wordpress, php]
+    vulnerability_class: csrf
+    cwe: ["CWE-352"]
+    owasp: ["A8:2021-Software and Data Integrity Failures"]
+    references:
+      - "https://developer.wordpress.org/plugins/security/nonces/"
+      - "https://noob3xploiter.medium.com/automating-csrf-detection-in-wordpress-plugins-with-semgrep-52ece2c212b7"
+
+- id: "wordpress-csrf-admin-post-handler"
+  patterns:
+    - pattern-inside: |
+        function $FUNC(...) {
+          ...
+        }
+    - pattern-either:
+        - pattern: add_action('admin_post_$ACTION', $CALLBACK)
+        - pattern: add_action('admin_post_nopriv_$ACTION', $CALLBACK)
+    - pattern-not: |
+        check_admin_referer($ACTION)
+    - pattern-not: |
+        wp_verify_nonce(...)
+  languages: ["php"]
+  message: |
+    Missing CSRF protection in WordPress admin-post handler. Admin-post endpoints require nonce verification to prevent CSRF attacks.
+    
+    Vulnerable code example:
+    add_action('admin_post_my_action', 'my_callback_function');
+    
+    Secure code with nonce verification:
+    add_action('admin_post_my_action', 'my_callback_function');
+    function my_callback_function() {
+        check_admin_referer('my_action_nonce');
+        // Process the request safely
+    }
+  severity: ERROR
+  metadata:
+    category: security
+    technology: [wordpress, php]
+    vulnerability_class: csrf
+    cwe: ["CWE-352"]
+
+- id: "wordpress-csrf-ajax-handler"
+  patterns:
+    - pattern-inside: |
+        function $FUNC(...) {
+          ...
+        }
+    - pattern-either:
+        - pattern: add_action('wp_ajax_$ACTION', $CALLBACK)
+        - pattern: add_action('wp_ajax_nopriv_$ACTION', $CALLBACK)
+    - pattern-not: |
+        check_ajax_referer($ACTION, $PARAM)
+    - pattern-not: |
+        wp_verify_nonce(...)
+  languages: ["php"]
+  message: |
+    Missing CSRF protection in WordPress AJAX handler. AJAX requests require nonce verification, especially for nopriv (non-authenticated) endpoints.
+    
+    Vulnerable code example:
+    add_action('wp_ajax_nopriv_update_data', 'update_data_callback');
+    
+    Secure code with nonce verification:
+    add_action('wp_ajax_nopriv_update_data', 'update_data_callback');
+    function update_data_callback() {
+        check_ajax_referer('update_data_nonce', 'security');
+        // Process the AJAX request safely
+        wp_die();
+    }
+  severity: ERROR
+  metadata:
+    category: security
+    technology: [wordpress, php]
+    vulnerability_class: csrf
+    cwe: ["CWE-352"]
+
+- id: "wordpress-csrf-settings-form"
+  patterns:
+    - pattern-inside: |
+        function $FUNC(...) {
+          ...
+        }
+    - pattern: |
+        if (isset($_POST['submit'])) {
+            ...
+            update_option($KEY, $_POST[$VALUE]);
+            ...
+        }
+    - pattern-not-inside: |
+        if (!wp_verify_nonce(...)) {
+            ...
+        }
+    - pattern-not-inside: |
+        if (!check_admin_referer(...)) {
+            ...
+        }
+  languages: ["php"]
+  message: |
+    Missing CSRF protection in WordPress settings form. Settings forms that update options require nonce verification.
+    
+    Vulnerable code example:
+    if (isset($_POST['submit'])) {
+        update_option('my_option', $_POST['option_value']);
+    }
+    
+    Secure code with nonce field and verification:
+    if (isset($_POST['submit']) && check_admin_referer('my_settings_nonce')) {
+        update_option('my_option', sanitize_text_field($_POST['option_value']));
+    }
+    
+    In the form: wp_nonce_field('my_settings_nonce');
+  severity: ERROR
+  metadata:
+    category: security
+    technology: [wordpress, php]
+    vulnerability_class: csrf
+    cwe: ["CWE-352"]
